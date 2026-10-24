@@ -1,4 +1,32 @@
-ERROR: no raw files found under /Users/seyma/Desktop/turkish-straits-maritime-pipeline/data/raw (run src/ingest.py first)
-STATUS: FAILED (transaction rolled back, database unchanged)
-ERROR: no raw files found under /Users/seyma/Desktop/turkish-straits-maritime-pipeline/data/raw (run src/ingest.py first)
-STATUS: FAILED (transaction rolled back, database unchanged)
+
+===== LOAD SUMMARY =====
+files read: 8 raw files (ais: 4, marine: 4) (2026-10-10 .. 2026-10-22)
+vessels: 67 in database (+0 new this run)
+marine_points: 8 in database (+0 new this run)
+ais_positions: 72 in database (+0 this run)
+wave_readings: 960 in database (+0 this run)
+records read: ais 76, marine readings 1536; duplicates collapsed: 576; non-position frames skipped: 4
+values cleaned: 0 (non-numeric -> NULL); numeric strings converted: 0; NULL in source (kept): 0
+quarantined: 0 records this run (0 in table)
+foreign_key_check: OK
+STATUS: COMPLETE
+
+===== LOAD SUMMARY =====
+files read: 8 raw files (ais: 4, marine: 4) (2026-10-10 .. 2026-10-22)
+vessels: 67 in database (+0 new this run)
+marine_points: 8 in database (+0 new this run)
+ais_positions: 72 in database (+0 this run)
+wave_readings: 960 in database (+0 this run)
+records read: ais 76, marine readings 1536; duplicates collapsed: 576; non-position frames skipped: 4
+values cleaned: 0 (non-numeric -> NULL); numeric strings converted: 0; NULL in source (kept): 0
+quarantined: 0 records this run (0 in table)
+foreign_key_check: OK
+STATUS: COMPLETE
+duplicate natural key: PASS
+orphan event:          PASS
+NULL key:              PASS
+wrong type:            PASS
+idempotence:           PASS  counts {'vessel': 67, 'marine_point': 8, 'ais_position': 72, 'wave_reading': 960, 'quarantine': 0}
+atomicity:             PASS
+
+ALL CHECKS PASSED
