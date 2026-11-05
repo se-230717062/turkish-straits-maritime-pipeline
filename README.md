@@ -116,8 +116,10 @@ its own UTC hour, so it is counted at most once.
 point_lat  point_lon  wave_class         n_positions  avg_sog_knots  n_waiting  pct_waiting
 ---------  ---------  -----------------  -----------  -------------  ---------  -----------
 40.958336  28.958344  1 calm (<= 1.5 m)  1            11.7           0          0.0
-41.375     29.208344  1 calm (<= 1.5 m)  3            6.93           1          33.3
+41.375     29.208344  1 calm (<= 1.5 m)  4            7.65           1          25.0
 ```
+(M3 revision: the query reads `ais_position_clean` and corrects the east-west distance. The correction
+brings one more position into the 0.5 degree radius of point 41.375/29.208: 3 positions before, 4 now.)
 
 ### How to build the database
 ```bash
@@ -165,6 +167,31 @@ nearest to its centroid (view `anchorage_wave_point`), so the wave join cannot f
 - `sql/queries/wave_vs_speed.sql` (M2 query, revised): reads the clean view; the `sog < 102.3`
   filter moved out of the query; the distance now scales longitude by cos(40 deg)^2 = 0.587.
 
+### Results on the real database (72 positions, 67 vessels)
+Cleaning log (raw rows changed per rule):
+
+| Rule | Rows | Share of 72 |
+|---|---|---|
+| `sog` 102.3 / out of range | 0 | 0% |
+| `cog` 360 / out of range | 11 | 15% |
+| `true_heading` 511 / out of range | 20 | 28% |
+| `nav_status` 15 / out of range | 3 | 4% |
+| `rate_of_turn` -128 / out of range | 20 | 28% |
+| invalid position (lat 91, lon 181, (0,0), NULL) | 0 | 0% |
+
+Every anchorage found a wave point (squared distance 0.001 to 0.039 degree^2, limit 0.25), and no position
+lies in two anchorages. Only 1 of 72 positions (1 vessel) lies inside an anchorage polygon (Bosphorus North).
+
+Anchorage query result:
+
+```
+anchorage                             wave_class         n_positions  n_vessels  avg_sog_knots  n_waiting  pct_waiting
+------------------------------------  -----------------  -----------  ---------  -------------  ---------  -----------
+Bosphorus North (Black Sea entrance)  1 calm (<= 1.5 m)  1            1          9.9            0          0.0
+```
+This is one position in the calm class: it shows that the pipeline works end to end, but it is
+**not evidence** about waves and waiting. Rough (1.5-2.5 m) and severe (> 2.5 m) classes are still empty.
+
 ### Checks (`python src/checks_m3.py`)
 Synthetic raw files in a temporary database: sentinels become NULL, valid values survive, the raw
 table is untouched, invalid positions are flagged, cleaning_log counts match, point-in-polygon
@@ -175,10 +202,10 @@ idempotent reload (digest of every table, including the anchorage tables).
 - Anchorage polygons are placeholders until replaced with official ones.
 - "Waiting" is still a snapshot (Sog < 0.5 kn at one timestamp). With ~10-minute snapshots on a few days,
   waiting *duration* is not measurable. More ingest runs (storm days, longer collection) are needed.
-- The sample is small and the M2 result had no hour above 1.5 m: the wave effect cannot be concluded
+- The sample is small (1 position inside an anchorage, none in an hour above 1.5 m): the wave effect cannot be concluded
   until more data with rough sea state is collected.
 - Wave point to anchorage assignment uses the nearest point within ~0.5 degree; far anchorages get none
   (they simply produce no rows).
 
 ### Status
-M3 - cleaning layer and anchorage model complete (code verified on synthetic data; run on the real database to get the real numbers).
+M3 - cleaning layer and anchorage model complete and run on the real database (see results above).
