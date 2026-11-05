@@ -7,8 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DB = ROOT / os.environ.get("DB_PATH", "data/maritime.db")
-SCHEMA_FILES = [ROOT / "sql" / f for f in ("schema.sql", "clean.sql", "anchorage.sql")]  # order matters
-SCHEMA_FILE = SCHEMA_FILES[0]  # kept for backward compatibility
+SCHEMA_FILE = ROOT / "sql" / "schema.sql"
 
 # Fixed, literal statements: no SQL is ever built from strings.
 COUNT_SQL = {
@@ -17,8 +16,6 @@ COUNT_SQL = {
     "ais_position": "SELECT COUNT(*) FROM ais_position",
     "wave_reading": "SELECT COUNT(*) FROM wave_reading",
     "quarantine": "SELECT COUNT(*) FROM quarantine",
-    "anchorage": "SELECT COUNT(*) FROM anchorage",
-    "anchorage_vertex": "SELECT COUNT(*) FROM anchorage_vertex",
 }
 DUMP_SQL = {
     "vessel": "SELECT * FROM vessel ORDER BY vessel_key",
@@ -26,8 +23,6 @@ DUMP_SQL = {
     "ais_position": "SELECT * FROM ais_position ORDER BY vessel_key, observed_at",
     "wave_reading": "SELECT * FROM wave_reading ORDER BY point_key, observed_at",
     "quarantine": "SELECT * FROM quarantine ORDER BY quarantine_key",
-    "anchorage": "SELECT * FROM anchorage ORDER BY anchorage_key",
-    "anchorage_vertex": "SELECT * FROM anchorage_vertex ORDER BY anchorage_key, seq",
 }
 
 
@@ -58,21 +53,16 @@ def transaction(con):
         con.execute("COMMIT")
 
 
-def _run_script(con, path):
+def init_schema(con):
+    """Run sql/schema.sql statement by statement (idempotent; transactional)."""
     buf = ""
-    for line in path.read_text(encoding="utf-8").splitlines(keepends=True):
+    for line in SCHEMA_FILE.read_text(encoding="utf-8").splitlines(keepends=True):
         buf += line
         if sqlite3.complete_statement(buf):
             con.execute(buf)
             buf = ""
     if buf.strip() and not all(l.strip().startswith("--") or not l.strip() for l in buf.splitlines()):
-        raise RuntimeError("incomplete statement at end of %s" % path.name)
-
-
-def init_schema(con):
-    """Run every file in SCHEMA_FILES statement by statement (idempotent; transactional)."""
-    for path in SCHEMA_FILES:
-        _run_script(con, path)
+        raise RuntimeError("incomplete statement at end of schema.sql")
 
 
 def table_counts(con) -> dict:

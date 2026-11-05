@@ -116,10 +116,8 @@ its own UTC hour, so it is counted at most once.
 point_lat  point_lon  wave_class         n_positions  avg_sog_knots  n_waiting  pct_waiting
 ---------  ---------  -----------------  -----------  -------------  ---------  -----------
 40.958336  28.958344  1 calm (<= 1.5 m)  1            11.7           0          0.0
-41.375     29.208344  1 calm (<= 1.5 m)  4            7.65           1          25.0
+41.375     29.208344  1 calm (<= 1.5 m)  3            6.93           1          33.3
 ```
-(M3 revision: the query reads `ais_position_clean` and corrects the east-west distance. The correction
-brings one more position into the 0.5 degree radius of point 41.375/29.208: 3 positions before, 4 now.)
 
 ### How to build the database
 ```bash
@@ -128,84 +126,31 @@ python src/ingest.py                   # M1: land raw data (skip if data/raw alr
 python src/load.py                     # builds data/maritime.db from scratch; running again changes nothing
 python src/key_tests.py                # key evidence (section above)
 python src/checks.py                   # six M2 checks on a temporary copy
-python src/checks_m3.py                # M3 checks (cleaning, anchorage polygons, queries)
-python src/clean_report.py             # M3 report: cleaning log, anchorage counts, both queries
+python src/clean.py                    # M3: builds the cleaned layer from the M2 tables (idempotent, atomic)
+python src/validate.py                 # M3: expectations as code (PASS / WARN / STOP)
+python src/checks_m3.py                # M3: tests of clean.py and validate.py on synthetic rows
 ```
 The database file is git-ignored (`data/*.db`); anyone with the raw data can rebuild it with `python src/load.py`.
 
-## Cleaning and anchorages (M3)
+## Data Quality (M3)
 
-### Principle
-The raw table `ais_position` is never modified. All cleaning is in the view `ais_position_clean`
-(`sql/clean.sql`), so each rule is visible, countable and reversible. `load.py` creates the views
-and tables on every run (`db.init_schema` now runs `schema.sql`, `clean.sql`, `anchorage.sql`).
+<<FILL AFTER THE REAL RUN: 3-4 sentences with the most important findings, e.g. which AIS fields carry
+"not available" codes and how many rows, whether any wave point has no model coverage, which WARNs fired.>>
+Full evidence, issues register, flag dictionary and decisions: [docs/cleaning_report.md](docs/cleaning_report.md).
+Profile (committed with outputs): `notebooks/m3_profile.ipynb`.
 
-### Cleaning rules
-| Column | Raw "not available" / invalid | Clean value |
-|---|---|---|
-| `sog` | 102.3, or outside 0..102.2 | NULL |
-| `cog` | 360, or outside 0..359.9 | NULL |
-| `true_heading` | 511, or outside 0..359 | NULL |
-| `nav_status` | 15 (undefined), or outside 0..14 | NULL |
-| `rate_of_turn` | -128, or outside -127..127 | NULL |
-| `latitude`, `longitude` | lat 91 / lon 181, out of range, (0, 0) | NULL, `position_valid = 0` |
+The M2 tables are never changed. The cleaned layer sits next to them (`sql/clean_schema.sql`): for every
+value cleaning can change there is `<col>_raw` (exactly as loaded), `<col>` (cleaned, NULL when not trusted,
+never imputed) and `<col>_flag` (why they differ, with a CHECK list). Name, category and identity decisions are
+data in `data/mappings/*.csv` (who decided, when, why). Analyses should read vessels through the view
+`vessel_resolved`.
 
-NULL means "unknown", never zero. A row with an invalid position is kept (its Sog is still usable)
-but is excluded from every spatial join. The view `cleaning_log` reports how many raw rows each rule
-changed; `python src/clean_report.py` prints it.
-
-### Anchorages
-Tables `anchorage` (one row per anchorage) and `anchorage_vertex` (one row per polygon corner, ordered
-by `seq`). The polygons in `sql/anchorage.sql` are **approximate placeholder boxes** around our wave points
-and must be replaced with official coordinates. Point-in-polygon is ray casting in SQL (view
-`ais_in_anchorage`, grain: position x anchorage). Each anchorage gets exactly one wave point, the
-nearest to its centroid (view `anchorage_wave_point`), so the wave join cannot fan out.
-
-### Queries
-- `sql/queries/wave_vs_speed_anchorage.sql`: waiting share (Sog < 0.5 kn) and average speed per
-  (anchorage, wave class), only for positions **inside** an anchorage polygon.
-- `sql/queries/wave_vs_speed.sql` (M2 query, revised): reads the clean view; the `sog < 102.3`
-  filter moved out of the query; the distance now scales longitude by cos(40 deg)^2 = 0.587.
-
-### Results on the real database (72 positions, 67 vessels)
-Cleaning log (raw rows changed per rule):
-
-| Rule | Rows | Share of 72 |
-|---|---|---|
-| `sog` 102.3 / out of range | 0 | 0% |
-| `cog` 360 / out of range | 11 | 15% |
-| `true_heading` 511 / out of range | 20 | 28% |
-| `nav_status` 15 / out of range | 3 | 4% |
-| `rate_of_turn` -128 / out of range | 20 | 28% |
-| invalid position (lat 91, lon 181, (0,0), NULL) | 0 | 0% |
-
-Every anchorage found a wave point (squared distance 0.001 to 0.039 degree^2, limit 0.25), and no position
-lies in two anchorages. Only 1 of 72 positions (1 vessel) lies inside an anchorage polygon (Bosphorus North).
-
-Anchorage query result:
-
+```bash
+python src/load.py        # M2 tables from data/raw (running it again changes nothing)
+python src/clean.py       # cleaned layer + mapping tables; prints flag counts; exit code 1 on failure
+python src/validate.py    # PASS / WARN / STOP; exit code 1 if any STOP fails
+python src/checks_m3.py   # optional: tests of the cleaning and validation code
 ```
-anchorage                             wave_class         n_positions  n_vessels  avg_sog_knots  n_waiting  pct_waiting
-------------------------------------  -----------------  -----------  ---------  -------------  ---------  -----------
-Bosphorus North (Black Sea entrance)  1 calm (<= 1.5 m)  1            1          9.9            0          0.0
-```
-This is one position in the calm class: it shows that the pipeline works end to end, but it is
-**not evidence** about waves and waiting. Rough (1.5-2.5 m) and severe (> 2.5 m) classes are still empty.
-
-### Checks (`python src/checks_m3.py`)
-Synthetic raw files in a temporary database: sentinels become NULL, valid values survive, the raw
-table is untouched, invalid positions are flagged, cleaning_log counts match, point-in-polygon
-(inside / outside), no overlapping polygons, hand-computed result of the anchorage query,
-idempotent reload (digest of every table, including the anchorage tables).
-
-### Known limits (M3)
-- Anchorage polygons are placeholders until replaced with official ones.
-- "Waiting" is still a snapshot (Sog < 0.5 kn at one timestamp). With ~10-minute snapshots on a few days,
-  waiting *duration* is not measurable. More ingest runs (storm days, longer collection) are needed.
-- The sample is small (1 position inside an anchorage, none in an hour above 1.5 m): the wave effect cannot be concluded
-  until more data with rough sea state is collected.
-- Wave point to anchorage assignment uses the nearest point within ~0.5 degree; far anchorages get none
-  (they simply produce no rows).
 
 ### Status
-M3 - cleaning layer and anchorage model complete and run on the real database (see results above).
+M3 - cleaned layer and quality report complete.
