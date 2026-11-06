@@ -1,0 +1,15 @@
+PASS  cleaned row count equals raw                   vessel_clean 67 = 67, ais_position_clean 72 = 72, wave_reading_clean 960 = 960
+PASS  no impossible cleaned value                    0 impossible ais, 0 impossible wave, 0 invalid-flagged values kept
+PASS  foreign_key_check empty                        OK
+PASS  _raw columns equal the M2 values               0 mismatching rows
+PASS  missing share per marine point <= 20%          all 8 points ok
+PASS  every marine point has model coverage          all points covered
+PASS  every point has a value in the latest hour     latest hour 2026-10-22T23:00Z
+WARN  no wave gap longer than 24 h                   8 gaps (first: 2026-10-10T23:00Z -> 2026-10-20T00:00Z)
+WARN  no stuck_value wave heights                    9 stuck_value flags
+PASS  wind-wave height never exceeds total           0 inconsistent rows
+WARN  nav_status agrees with sog                     1 conflicting positions
+PASS  every AIS position has usable coordinates      0 positions without a usable coordinate
+PASS  no two vessels share a normalised name         no candidates
+PASS  mapping rows name who decided                  0 rows still say TODO
+11 PASS, 3 WARN, 0 STOP

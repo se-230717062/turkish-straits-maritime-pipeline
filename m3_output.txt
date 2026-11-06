@@ -1,18 +1,6 @@
 
 ===== LOAD SUMMARY =====
 files read: 8 raw files (ais: 4, marine: 4) (2026-10-10 .. 2026-10-22)
-vessels: 67 in database (+67 new this run)
-marine_points: 8 in database (+8 new this run)
-ais_positions: 72 in database (+72 this run)
-wave_readings: 960 in database (+960 this run)
-records read: ais 76, marine readings 1536; duplicates collapsed: 576; non-position frames skipped: 4
-values cleaned: 0 (non-numeric -> NULL); numeric strings converted: 0; NULL in source (kept): 0
-quarantined: 0 records this run (0 in table)
-foreign_key_check: OK
-STATUS: COMPLETE
-
-===== LOAD SUMMARY =====
-files read: 8 raw files (ais: 4, marine: 4) (2026-10-10 .. 2026-10-22)
 vessels: 67 in database (+0 new this run)
 marine_points: 8 in database (+0 new this run)
 ais_positions: 72 in database (+0 this run)
@@ -22,60 +10,36 @@ values cleaned: 0 (non-numeric -> NULL); numeric strings converted: 0; NULL in s
 quarantined: 0 records this run (0 in table)
 foreign_key_check: OK
 STATUS: COMPLETE
-duplicate natural key: PASS
-orphan event:          PASS
-NULL key:              PASS
-wrong type:            PASS
-idempotence:           PASS  counts {'vessel': 67, 'marine_point': 8, 'ais_position': 72, 'wave_reading': 960, 'quarantine': 0, 'anchorage': 4, 'anchorage_vertex': 16}
-atomicity:             PASS
-
-ALL CHECKS PASSED
-load + idempotence (M3):   PASS  anchorage=4, vertices=16
-sentinels -> NULL:         PASS  (41.27, None, None, None, None, None, 1)
-valid values kept:         PASS  (41.27, 0.1, 90.0, 90, 1, 0, 1)
-invalid position flagged:  PASS  (None, 5.0, 10.0, 10, 0, 0, 0)
-raw table untouched:       PASS
-cleaning_log counts:       PASS
-point in polygon:          PASS  {1: [1], 2: [1], 3: [], 4: [1], 5: []}
-no overlapping polygons:   PASS
-anchorage query result:    PASS
-M2 query on clean layer:   PASS  positions matched: 3 (sentinel-Sog and invalid-position rows excluded)
+clean.py FAILED: OperationalError('cannot modify ais_position_clean because it is a view')
+STATUS: FAILED (the cleaned layer was left as it was before this run)
+clean.py FAILED: OperationalError('cannot modify ais_position_clean because it is a view')
+STATUS: FAILED (the cleaned layer was left as it was before this run)
+STOP  validate.py could not run: OperationalError('no such table: vessel_clean') (did you run clean.py?)
+M2 tables untouched:               PASS
+idempotent (run twice):            PASS
+same row count as raw:             PASS
+vessel: mmsi and names:            PASS  (271000003, 271000003, 'ok', 'İSTANBUL', 'normalised')
+sentinels become NULL + flag:      PASS  ('invalid_sentinel', 'invalid_sentinel', 'invalid_sentinel', 'invalid_sentinel', 'invalid_sentinel', 'ok', 'ok', 'ok', None, 41.0)
+lat/lon sentinel:                  PASS
+out of range + null island:        PASS  ('invalid_out_of_range', 'invalid_out_of_range', 'invalid_out_of_range', 'invalid_out_of_range', 'invalid_out_of_range', 'invalid_null_island', 'invalid_null_island', 'ok', None, None)
+outside region + conflict:         PASS
+missing + valid kept:              PASS
+unusual_high kept (IQR):           PASS
+wave: missing/invalid:             PASS  ['ok', 'ok', 'ok', 'missing_not_reported', 'ok', 'invalid_negative', 'invalid_out_of_range', 'ok']
+wave: stuck run kept:              PASS
+wave: spike kept:                  PASS  spike
+wave: unusual_high kept:           PASS  unusual_high
+wave: other columns:               PASS  [('invalid_out_of_range', 'ok', 'ok'), ('ok', 'invalid_out_of_range', 'ok'), ('ok', 'ok', 'inconsistent_exceeds_total')]
+wave: no model coverage:           PASS
+no imputation:                     PASS
+threshold change + restore:        PASS
+atomic (injected failure):         PASS
+validate on good data:             PASS  WARN  every marine point has model coverage          no mode
+STOP fails: row count:             PASS
+STOP fails: impossible value:      PASS
+STOP fails: foreign key:           PASS
+STOP fails: raw preserved:         PASS
+no write to an M2 table in clean code: PASS  []
+no f-string SQL in the repository: PASS  []
 
 ALL M3 CHECKS PASSED
-
-== cleaning log (raw rows changed per rule) ==
-rule                                                  n_rows
-----------------------------------------------------  ------
-sog: 102.3 / out of range -> NULL                     0     
-cog: 360 / out of range -> NULL                       11    
-true_heading: 511 / out of range -> NULL              20    
-nav_status: 15 / out of range -> NULL                 3     
-rate_of_turn: -128 / out of range -> NULL             20    
-position: lat 91 / lon 181 / (0,0) / NULL -> invalid  0     
-TOTAL raw rows in ais_position                        72    
-
-== positions inside each anchorage ==
-name                                  n_positions  n_vessels
-------------------------------------  -----------  ---------
-Bosphorus North (Black Sea entrance)  1            1        
-
-== anchorage -> wave point (nearest to centroid) ==
-name                                  point_lat  point_lon  dist2 
-------------------------------------  ---------  ---------  ------
-Bosphorus North (Black Sea entrance)  41.375     29.208344  0.01  
-Bosphorus South (Istanbul / Marmara)  40.958336  28.958344  0.0012
-Canakkale South (Aegean entrance)     40.041664  26.125015  0.0071
-Izmit Bay entrance                    40.791664  29.291672  0.0393
-
-positions in more than one anchorage (must be 0): 0
-
-== sql/queries/wave_vs_speed.sql ==
-point_lat  point_lon  wave_class         n_positions  avg_sog_knots  n_waiting  pct_waiting
----------  ---------  -----------------  -----------  -------------  ---------  -----------
-40.958336  28.958344  1 calm (<= 1.5 m)  1            11.7           0          0.0        
-41.375     29.208344  1 calm (<= 1.5 m)  4            7.65           1          25.0       
-
-== sql/queries/wave_vs_speed_anchorage.sql ==
-anchorage                             wave_class         n_positions  n_vessels  avg_sog_knots  n_waiting  pct_waiting
-------------------------------------  -----------------  -----------  ---------  -------------  ---------  -----------
-Bosphorus North (Black Sea entrance)  1 calm (<= 1.5 m)  1            1          9.9            0          0.0        

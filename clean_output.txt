@@ -1,0 +1,78 @@
+vessel_clean: 67 rows (raw: 67)
+
+             ok
+  mmsi       67
+  ship_name  67
+ais_position_clean: 72 rows (raw: 72)
+
+                invalid_sentinel  nav_status_conflicts_with_sog  ok
+  latitude                     0                              0  72
+  longitude                    0                              0  72
+  sog                          0                              0  72
+  cog                         11                              0  61
+  true_heading                20                              0  52
+  nav_status                   3                              0  69
+  rate_of_turn                20                              0  52
+  row_flag                     0                              1  71
+wave_reading_clean: 960 rows (raw: 960)
+
+                    ok  stuck_value  unusual_high
+  wave_height       922            9            29
+  wave_direction    960            0             0
+  wave_period       960            0             0
+  wind_wave_height  960            0             0
+wave_height flags per marine point (point_key):
+           ok  stuck_value  unusual_high
+  point 1  103            0            17
+  point 2  108            0            12
+  point 3  120            0             0
+  point 4  120            0             0
+  point 5  120            0             0
+  point 6  120            0             0
+  point 7  120            0             0
+  point 8  111            9             0
+mappings loaded: nav_status_map 15 rows, name_placeholder 9 rows, vessel_alias 0 rows
+  vessel_alias entries matching no vessel: none
+  name_placeholder entries matching no vessel: 9 of 9
+  nav_status codes never seen in the data: [2, 3, 4, 6, 7, 10, 11, 12, 13, 14]
+M2 tables unchanged (sha256 of every table equal before and after)
+STATUS: COMPLETE
+vessel_clean: 67 rows (raw: 67)
+
+             ok
+  mmsi       67
+  ship_name  67
+ais_position_clean: 72 rows (raw: 72)
+
+                invalid_sentinel  nav_status_conflicts_with_sog  ok
+  latitude                     0                              0  72
+  longitude                    0                              0  72
+  sog                          0                              0  72
+  cog                         11                              0  61
+  true_heading                20                              0  52
+  nav_status                   3                              0  69
+  rate_of_turn                20                              0  52
+  row_flag                     0                              1  71
+wave_reading_clean: 960 rows (raw: 960)
+
+                    ok  stuck_value  unusual_high
+  wave_height       922            9            29
+  wave_direction    960            0             0
+  wave_period       960            0             0
+  wind_wave_height  960            0             0
+wave_height flags per marine point (point_key):
+           ok  stuck_value  unusual_high
+  point 1  103            0            17
+  point 2  108            0            12
+  point 3  120            0             0
+  point 4  120            0             0
+  point 5  120            0             0
+  point 6  120            0             0
+  point 7  120            0             0
+  point 8  111            9             0
+mappings loaded: nav_status_map 15 rows, name_placeholder 9 rows, vessel_alias 0 rows
+  vessel_alias entries matching no vessel: none
+  name_placeholder entries matching no vessel: 9 of 9
+  nav_status codes never seen in the data: [2, 3, 4, 6, 7, 10, 11, 12, 13, 14]
+M2 tables unchanged (sha256 of every table equal before and after)
+STATUS: COMPLETE

@@ -10,7 +10,7 @@ All thresholds live in src/clean_config.py. Nothing is imputed: a value is NULL 
 Rule order (first rule that applies wins, per value):
   numeric AIS fields : missing -> sentinel -> out of range -> (sog only) unusual_high -> ok
   latitude/longitude : missing -> sentinel -> out of range -> null island -> outside region -> ok
-  wave_height        : missing -> negative -> out of range -> stuck_value -> spike -> unusual_high -> ok
+  wave_height        : missing -> negative -> out of range -> stuck_value (>= STUCK_MIN_M) -> spike -> unusual_high -> ok
   other wave fields  : missing -> out of range / negative -> (wind) inconsistent_exceeds_total -> ok
   ship_name          : missing -> placeholder_name -> normalised -> ok
   mmsi               : invalid_length -> not_a_ship -> ok
@@ -233,7 +233,7 @@ def build_waves(con, cfg):
         run = []
 
         def close(run):
-            if len(run) >= cfg.STUCK_RUN and height[run[0]] != 0:
+            if len(run) >= cfg.STUCK_RUN and height[run[0]] >= cfg.STUCK_MIN_M:
                 for j in run:
                     hflag[j] = "stuck_value"
         for i in idx:

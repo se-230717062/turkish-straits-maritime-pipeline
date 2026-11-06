@@ -91,6 +91,13 @@ def run(db_path=None, out=print):
             "(SELECT point_key FROM wave_reading_clean WHERE observed_at = ? AND wave_height IS NOT NULL)", (latest,))]
         check("WARN", "every point has a value in the latest hour", not stale,
               "latest hour %s" % latest if not stale else "latest hour %s, missing at points %s" % (latest, stale))
+        gaps = con.execute(
+            "SELECT COUNT(*), MIN(prev), MIN(observed_at) FROM (SELECT point_key, observed_at, "
+            "LAG(observed_at) OVER (PARTITION BY point_key ORDER BY observed_at) AS prev FROM wave_reading_clean) "
+            "WHERE prev IS NOT NULL AND julianday(substr(observed_at, 1, 10) || ' ' || substr(observed_at, 12, 5)) "
+            "- julianday(substr(prev, 1, 10) || ' ' || substr(prev, 12, 5)) > ?", (C.MAX_GAP_HOURS / 24.0,)).fetchone()
+        check("WARN", "no wave gap longer than %d h" % C.MAX_GAP_HOURS, gaps[0] == 0,
+              "no gaps" if gaps[0] == 0 else "%d gaps (first: %s -> %s)" % gaps)
         n_stuck = con.execute("SELECT COUNT(*) FROM wave_reading_clean WHERE wave_height_flag = 'stuck_value'").fetchone()[0]
         check("WARN", "no stuck_value wave heights", n_stuck == 0, "%d stuck_value flags" % n_stuck)
         n_wind = con.execute("SELECT COUNT(*) FROM wave_reading_clean "

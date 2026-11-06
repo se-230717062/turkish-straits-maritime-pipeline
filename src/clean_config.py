@@ -26,11 +26,13 @@ MMSI_SHIP_FIRST_DIGITS = "234567"   # MID 2xx-7xx = ship stations; other prefixe
 WAVE_HEIGHT_MAX = 25.0      # metres; above this the model value is not credible
 WAVE_PERIOD_MAX = 30.0      # seconds
 DIRECTION_MAX = 360.0       # degrees
-STUCK_RUN = 6               # consecutive hours of the identical non-zero wave height -> stuck_value (kept)
+STUCK_RUN = 6               # consecutive hours of the identical wave height -> stuck_value (kept) ...
+STUCK_MIN_M = 0.3           # ... but only at or above this height: calm-sea values sit on the model's 0.02 m grid and repeat for days
 SPIKE_M = 1.0               # metres; one hour higher than BOTH neighbours by more than this -> spike (kept)
 ROBUST_Z = 3.5              # robust z = 0.6745 * (x - median) / MAD, per marine point
-UNUSUAL_MIN_M = 1.0         # unusual_high only for wave heights of at least this many metres
+UNUSUAL_MIN_M = 0.3         # unusual_high only for wave heights of at least this many metres (sample maximum is only 0.64 m)
 WIND_TOL_M = 0.05           # wind-wave height may exceed total wave height by at most this (rounding)
 
 # ---- validate.py -------------------------------------------------------------------------------
 MAX_MISSING_SHARE = 0.20    # WARN when a marine point has more than this share of missing_not_reported heights
+MAX_GAP_HOURS = 24          # WARN when a marine point has a gap longer than this between consecutive readings

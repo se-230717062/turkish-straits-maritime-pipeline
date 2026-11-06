@@ -1,16 +1,16 @@
 code,label,motion_group,decided_by,decided_at,note
-0,under way using engine,moving,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-1,at anchor,stationary,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-2,not under command,other,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-3,restricted manoeuvrability,other,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-4,constrained by her draught,other,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-5,moored,stationary,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-6,aground,stationary,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-7,engaged in fishing,moving,TODO-name,2026-11-05,fishing vessels move at trawling speed; grouped as moving
-8,under way sailing,moving,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-9,reserved (HSC),other,TODO-name,2026-11-05,reserved code
-10,reserved (WIG),other,TODO-name,2026-11-05,reserved code
-11,towing astern,moving,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-12,pushing ahead or towing alongside,moving,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
-13,reserved,other,TODO-name,2026-11-05,reserved code
-14,AIS-SART / MOB / EPIRB active,other,TODO-name,2026-11-05,ITU-R M.1371 navigational status table
+0,under way using engine,moving,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+1,at anchor,stationary,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+2,not under command,other,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+3,restricted manoeuvrability,other,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+4,constrained by her draught,other,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+5,moored,stationary,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+6,aground,stationary,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+7,engaged in fishing,moving,Hüseyin Sefa Endes,2026-11-06,fishing vessels move at trawling speed; grouped as moving
+8,under way sailing,moving,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+9,reserved (HSC),other,Hüseyin Sefa Endes,2026-11-06,reserved code
+10,reserved (WIG),other,Hüseyin Sefa Endes,2026-11-06,reserved code
+11,towing astern,moving,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+12,pushing ahead or towing alongside,moving,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table
+13,reserved,other,Hüseyin Sefa Endes,2026-11-06,reserved code
+14,AIS-SART / MOB / EPIRB active,other,Hüseyin Sefa Endes,2026-11-06,ITU-R M.1371 navigational status table

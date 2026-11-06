@@ -134,8 +134,7 @@ The database file is git-ignored (`data/*.db`); anyone with the raw data can reb
 
 ## Data Quality (M3)
 
-<<FILL AFTER THE REAL RUN: 3-4 sentences with the most important findings, e.g. which AIS fields carry
-"not available" codes and how many rows, whether any wave point has no model coverage, which WARNs fired.>>
+The AIS data carry "not available" codes in `true_heading` (20 of 72 rows), `rate_of_turn` (20), `cog` (11) and `nav_status` (3); they become NULL with a flag and the raw value stays next to them. The wave data has no NULLs, but it covers only 5 days (9, 10, 20, 21 and 22 Oct, a 9-day gap in between), its highest wave is 0.64 m, and no reading is above 1.5 m, so the wave-versus-speed question cannot be answered yet. Half of the AIS positions lie more than 180 km from every wave point. Unusual values (29 wave heights) and model plateaus (9) are flagged and kept, never deleted.
 Full evidence, issues register, flag dictionary and decisions: [docs/cleaning_report.md](docs/cleaning_report.md).
 Profile (committed with outputs): `notebooks/m3_profile.ipynb`.
 

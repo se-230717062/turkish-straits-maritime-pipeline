@@ -44,7 +44,8 @@ def make_db(path):
         con.execute(ins, (vk[m], "2026-10-11T%s:00.000Z" % t, *vals, ts))
     con.execute("INSERT INTO marine_point (latitude, longitude, retrieved_at, source_file) VALUES (41.375, 29.208, ?, 't/x')", (ts,))
     con.execute("INSERT INTO marine_point (latitude, longitude, retrieved_at, source_file) VALUES (40.0, 26.0, ?, 't/x')", (ts,))
-    p1, p2 = [k for (k,) in con.execute("SELECT point_key FROM marine_point ORDER BY point_key")]
+    con.execute("INSERT INTO marine_point (latitude, longitude, retrieved_at, source_file) VALUES (39.0, 27.0, ?, 't/x')", (ts,))
+    p1, p2, p3 = [k for (k,) in con.execute("SELECT point_key FROM marine_point ORDER BY point_key")]
     h = [.4, .5, .45, None, .5, -1.0, 99.0, .55, .6, .5] + [.8] * 7 + [.6, .5, .55, 3.5, .5] \
         + [1.0, 1.6, 2.4, 3.0, 3.4, 3.0, 2.4, 1.6]
     w_ins = ("INSERT INTO wave_reading (point_key, observed_at, wave_height, wave_direction, wave_period, "
@@ -56,6 +57,8 @@ def make_db(path):
         con.execute(w_ins, (p1, "2026-10-%02dT%02d:00Z" % (11 + i // 24, i % 24), v, d, p, w, ts))
     for i in range(5):
         con.execute(w_ins, (p2, "2026-10-11T%02d:00Z" % i, None, None, None, None, ts))
+    for i in range(12):   # calm sea on the model grid: identical values are expected, not a fault
+        con.execute(w_ins, (p3, "2026-10-11T%02d:00Z" % i, 0.04 if i < 10 else 0.06, 180.0, 4.0, 0.03, ts))
     con.close()
 
 
@@ -125,8 +128,11 @@ def main() -> int:
         report("wave: other columns", o[0][0] == "invalid_out_of_range" and o[1][1] == "invalid_out_of_range"
                and o[2][2] == "inconsistent_exceeds_total", str(o))
         cov = one("SELECT COUNT(*) FROM wave_reading_clean WHERE wave_height_flag = 'missing_no_model_coverage' "
-                  "AND point_key = (SELECT MAX(point_key) FROM marine_point)")
+                  "AND point_key = (SELECT point_key FROM marine_point WHERE latitude = 40.0)")
         report("wave: no model coverage", cov == 5)
+        calm = one("SELECT COUNT(*) FROM wave_reading_clean WHERE wave_height_flag <> 'ok' AND "
+                   "point_key = (SELECT point_key FROM marine_point WHERE latitude = 39.0)")
+        report("wave: calm identical run not stuck", calm == 0, "%d flagged" % calm)
 
         # ---- no imputation anywhere: cleaned value is either the raw value or NULL
         imp = one("SELECT COUNT(*) FROM wave_reading_clean WHERE wave_height IS NOT NULL AND wave_height IS NOT wave_height_raw") \
