@@ -1,20 +1,58 @@
+ERROR: no raw files found under /Users/seyma/Desktop/turkish-straits-maritime-pipeline/data/raw (run src/ingest.py first)
+STATUS: FAILED (transaction rolled back, database unchanged)
+vessel_clean: 67 rows (raw: 67)
 
-===== LOAD SUMMARY =====
-files read: 8 raw files (ais: 4, marine: 4) (2026-10-10 .. 2026-10-22)
-vessels: 67 in database (+0 new this run)
-marine_points: 8 in database (+0 new this run)
-ais_positions: 72 in database (+0 this run)
-wave_readings: 960 in database (+0 this run)
-records read: ais 76, marine readings 1536; duplicates collapsed: 576; non-position frames skipped: 4
-values cleaned: 0 (non-numeric -> NULL); numeric strings converted: 0; NULL in source (kept): 0
-quarantined: 0 records this run (0 in table)
-foreign_key_check: OK
+             ok
+  mmsi       67
+  ship_name  67
+ais_position_clean: 72 rows (raw: 72)
+
+                invalid_sentinel  nav_status_conflicts_with_sog  ok
+  latitude                     0                              0  72
+  longitude                    0                              0  72
+  sog                          0                              0  72
+  cog                         11                              0  61
+  true_heading                20                              0  52
+  nav_status                   3                              0  69
+  rate_of_turn                20                              0  52
+  row_flag                     0                              1  71
+wave_reading_clean: 960 rows (raw: 960)
+
+                    ok  stuck_value
+  wave_height       342          618
+  wave_direction    960            0
+  wave_period       960            0
+  wind_wave_height  960            0
+wave_height flags per marine point (point_key):
+           ok  stuck_value
+  point 1  56           64
+  point 2  72           48
+  point 3  12          108
+  point 4  14          106
+  point 5  35           85
+  point 6  28           92
+  point 7  32           88
+  point 8  93           27
+mappings loaded: nav_status_map 15 rows, name_placeholder 9 rows, vessel_alias 0 rows
+  vessel_alias entries matching no vessel: none
+  name_placeholder entries matching no vessel: 9 of 9
+  nav_status codes never seen in the data: [2, 3, 4, 6, 7, 10, 11, 12, 13, 14]
+M2 tables unchanged (sha256 of every table equal before and after)
 STATUS: COMPLETE
-clean.py FAILED: OperationalError('cannot modify ais_position_clean because it is a view')
-STATUS: FAILED (the cleaned layer was left as it was before this run)
-clean.py FAILED: OperationalError('cannot modify ais_position_clean because it is a view')
-STATUS: FAILED (the cleaned layer was left as it was before this run)
-STOP  validate.py could not run: OperationalError('no such table: vessel_clean') (did you run clean.py?)
+PASS  cleaned row count equals raw                   vessel_clean 67 = 67, ais_position_clean 72 = 72, wave_reading_clean 960 = 960
+PASS  no impossible cleaned value                    0 impossible ais, 0 impossible wave, 0 invalid-flagged values kept
+PASS  foreign_key_check empty                        OK
+PASS  _raw columns equal the M2 values               0 mismatching rows
+PASS  missing share per marine point <= 20%          all 8 points ok
+PASS  every marine point has model coverage          all points covered
+PASS  every point has a value in the latest hour     latest hour 2026-10-22T23:00Z
+WARN  no stuck_value wave heights                    618 stuck_value flags
+PASS  wind-wave height never exceeds total           0 inconsistent rows
+WARN  nav_status agrees with sog                     1 conflicting positions
+PASS  every AIS position has usable coordinates      0 positions without a usable coordinate
+PASS  no two vessels share a normalised name         no candidates
+WARN  mapping rows name who decided                  24 rows still say TODO
+10 PASS, 3 WARN, 0 STOP
 M2 tables untouched:               PASS
 idempotent (run twice):            PASS
 same row count as raw:             PASS
