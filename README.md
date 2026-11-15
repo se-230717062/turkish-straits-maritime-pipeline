@@ -151,5 +151,21 @@ python src/validate.py    # PASS / WARN / STOP; exit code 1 if any STOP fails
 python src/checks_m3.py   # optional: tests of the cleaning and validation code
 ```
 
+## Exploration (M4)
+
+![Wave height at the nearest point against vessel speed](figures/fig05_wave_vs_sog.png)
+
+The data cannot answer the project question yet (exploratory): the highest wave in the sample is 0.64 m against the 1.5 m threshold of the question, and only 5 of 72 AIS positions lie within 0.5 degrees of a wave point. Vessel speed is two groups, 43 of 72 positions below 0.5 kn and the rest mostly at 8 to 12 kn, so we report the share of waiting positions rather than the mean. The one comparison we could make (waiting share on 10 Oct against the later windows, +7.5 points, 95% interval -15.9 to +30.6) shows no reliable difference, and the groups have different latitude mixtures. Cleaning changed nothing for the key number. Details, 11 findings with labels and what would change them: [docs/eda_report.md](docs/eda_report.md).
+
+Reproduce from a fresh clone with landed raw data:
+
+```bash
+python src/load.py
+python src/clean.py
+python src/validate.py
+jupyter nbconvert --to notebook --execute --inplace notebooks/m4_eda.ipynb
+```
+The notebook opens the database read-only and writes the seven figures to `figures/`.
+
 ### Status
-M3 - cleaned layer and quality report complete.
+M4 — exploratory analysis complete.
