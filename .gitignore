@@ -7,3 +7,8 @@ data/raw/*
 !data/raw/.gitkeep
 .DS_Store
 data/*.db
+logs/
+data/pipeline.lock
+
+logs/
+data/pipeline.lock

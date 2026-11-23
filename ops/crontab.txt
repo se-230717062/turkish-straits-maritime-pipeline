@@ -1,0 +1,1 @@
+7 * * * * cd /Users/seyma/Desktop/turkish-straits-maritime-pipeline && /opt/anaconda3/bin/python src/run_pipeline.py >> logs/pipeline.log 2>&1
