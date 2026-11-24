@@ -3,6 +3,7 @@ import hashlib
 import os
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +39,23 @@ def connect(path=None) -> sqlite3.Connection:
     if con.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
         raise RuntimeError("could not enable foreign key enforcement")
     return con
+
+
+RUN_TIME_FMT = "%Y-%m-%dT%H:%MZ"
+
+
+def run_time() -> str:
+    """The pipeline's clock as ISO 8601 UTC, e.g. '2026-11-20T08:10Z'.
+
+    run_pipeline.py sets PIPELINE_RUN_TIME for every step, so all steps of one run
+    share one clock. When a script is started by hand without it, fall back to now.
+    Every "since", "last 24 hours" or "today" decision must use this, never datetime.now().
+    """
+    value = os.environ.get("PIPELINE_RUN_TIME")
+    if value:
+        datetime.strptime(value, RUN_TIME_FMT)  # raises ValueError on a malformed clock
+        return value
+    return datetime.now(timezone.utc).strftime(RUN_TIME_FMT)
 
 
 @contextmanager
