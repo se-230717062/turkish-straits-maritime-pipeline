@@ -4,6 +4,10 @@
 Run from the repository root:  python src/load.py
 Never calls an API. Idempotent (upserts), atomic (one transaction),
 parameterised (placeholders only), latest retrieved_at wins.
+
+M5: every upsert is GUARDED (DO UPDATE ... WHERE excluded.retrieved_at > <table>.retrieved_at), so loading an
+old file after a newer one can never undo the newer value, whatever the order. Loading is a full reload of all
+raw files on every run (timing is printed); it takes no clock decision, --run-time is accepted for the runner.
 """
 import argparse
 import hashlib
@@ -13,11 +17,12 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from collections import Counter
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from db import ROOT, connect, init_schema, table_counts, transaction
+from db import ROOT, connect, drill, init_schema, table_counts, transaction
 
 RAW_DIR = ROOT / os.environ.get("RAW_DATA_DIR", "data/raw")
 WAVE_VARS = ("wave_height", "wave_direction", "wave_period", "wind_wave_height")
@@ -34,7 +39,7 @@ ON CONFLICT (mmsi) DO UPDATE SET
     ship_name    = COALESCE(excluded.ship_name, vessel.ship_name),
     retrieved_at = excluded.retrieved_at,
     source_file  = excluded.source_file
-WHERE excluded.retrieved_at >= vessel.retrieved_at
+WHERE excluded.retrieved_at > vessel.retrieved_at
 """
 UPSERT_POSITION = """
 INSERT INTO ais_position (vessel_key, observed_at, latitude, longitude, sog, cog,
@@ -45,13 +50,13 @@ ON CONFLICT (vessel_key, observed_at) DO UPDATE SET
     cog = excluded.cog, true_heading = excluded.true_heading,
     nav_status = excluded.nav_status, rate_of_turn = excluded.rate_of_turn,
     retrieved_at = excluded.retrieved_at, source_file = excluded.source_file
-WHERE excluded.retrieved_at >= ais_position.retrieved_at
+WHERE excluded.retrieved_at > ais_position.retrieved_at
 """
 UPSERT_POINT = """
 INSERT INTO marine_point (latitude, longitude, retrieved_at, source_file) VALUES (?, ?, ?, ?)
 ON CONFLICT (latitude, longitude) DO UPDATE SET
     retrieved_at = excluded.retrieved_at, source_file = excluded.source_file
-WHERE excluded.retrieved_at >= marine_point.retrieved_at
+WHERE excluded.retrieved_at > marine_point.retrieved_at
 """
 UPSERT_WAVE = """
 INSERT INTO wave_reading (point_key, observed_at, wave_height, wave_direction, wave_period,
@@ -61,7 +66,7 @@ ON CONFLICT (point_key, observed_at) DO UPDATE SET
     wave_height = excluded.wave_height, wave_direction = excluded.wave_direction,
     wave_period = excluded.wave_period, wind_wave_height = excluded.wind_wave_height,
     retrieved_at = excluded.retrieved_at, source_file = excluded.source_file
-WHERE excluded.retrieved_at >= wave_reading.retrieved_at
+WHERE excluded.retrieved_at > wave_reading.retrieved_at
 """
 UPSERT_QUARANTINE = """
 INSERT INTO quarantine (source, reason, payload, payload_hash, retrieved_at, source_file)
@@ -69,7 +74,7 @@ VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (source, payload_hash) DO UPDATE SET
     reason = excluded.reason, payload = excluded.payload,
     retrieved_at = excluded.retrieved_at, source_file = excluded.source_file
-WHERE excluded.retrieved_at >= quarantine.retrieved_at
+WHERE excluded.retrieved_at > quarantine.retrieved_at
 """
 
 
@@ -335,8 +340,9 @@ def write_quarantine(con, items):
 # ------------------------------------------------------------------ run
 def run(db_path=None, raw_dir=None, out=print) -> int:
     raw_dir = Path(raw_dir) if raw_dir else RAW_DIR
+    started = time.monotonic()
     stats, quarantine = Counter(), []
-    con = connect(db_path)
+    con = connect(db_path, create=True)   # the loader builds the database
     try:
         ais_files = list_raw(raw_dir / "ais", "jsonl")
         marine_files = list_raw(raw_dir / "marine", "json")
@@ -387,6 +393,8 @@ def run(db_path=None, raw_dir=None, out=print) -> int:
     if stats["ship_names_changed"]:
         out("NOTE: %d vessel name(s) changed (type 1: latest kept)" % stats["ship_names_changed"])
     out("foreign_key_check: OK")
+    out("load time: %.2f s for %d raw files (%d AIS records, %d wave readings read)" % (
+        time.monotonic() - started, len(stamps), stats["ais_records_read"], stats["marine_readings_read"]))
     out("STATUS: COMPLETE")
     return 0
 
@@ -395,7 +403,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--db", help="database path (default data/maritime.db)")
     ap.add_argument("--raw", help="raw data dir (default data/raw)")
+    ap.add_argument("--run-time", help="the pipeline's clock, e.g. 2026-11-20T08:10Z (accepted; the loader decides nothing by time)")
     args = ap.parse_args()
+    drill("load")
     return run(args.db, args.raw)
 
 

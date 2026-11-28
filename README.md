@@ -167,5 +167,16 @@ jupyter nbconvert --to notebook --execute --inplace notebooks/m4_eda.ipynb
 ```
 The notebook opens the database read-only and writes the seven figures to `figures/`.
 
+## Pipeline (M5)
+
+```bash
+python src/run_pipeline.py                 # fetch, load, clean, validate (one command, logs every step)
+python src/run_pipeline.py --skip-ingest   # rebuild everything from landed raw data, no network
+python src/monitor.py                      # is it healthy? (run log, gaps, completeness, freshness; exit 1 on ALARM)
+```
+Schedule: hourly (pipeline at minute 7, monitor at minute 20) with cron on <<FILL: whose machine>>; `ops/crontab.txt` has the exact lines, `sh ops/install_cron.sh` installs them.
+When a step fails the runner stops, exits with that step's code (124 for a timeout, 75 if another run is in progress) and records the step in `data/pipeline_log.db`; nothing after it runs, so later steps never see half-written data.
+A missed run is healed by the next one for the wave data (the request reaches back to the last landed file plus a 24-hour overlap) but not for AIS, which has no history; `monitor.py` reports both. Details, drills and what can still go wrong: [docs/pipeline.md](docs/pipeline.md).
+
 ### Status
-M4 — exploratory analysis complete.
+M5 — pipeline running on a schedule since <<FILL: date>>.

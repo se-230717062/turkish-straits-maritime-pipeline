@@ -5,18 +5,26 @@ Run from the repository root:  python src/ingest.py
 
 Raw responses are saved exactly as received to data/raw/<source>/<UTC timestamp>.<ext>.
 No cleaning, filtering or renaming happens here (that is M3).
+
+M5: the run is driven by --run-time (the pipeline's clock; file names and every "since" decision use it).
+The marine request heals itself: it asks for everything since the last landed file, plus an overlap, bounded
+by what Open-Meteo still serves (past_days <= 92). AISStream is a live stream with no history: a missed
+run loses that period for good, and the run says so loudly.
 """
+import argparse
 import json
 import logging
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
 import websocket
 from dotenv import load_dotenv
+
+from db import drill, format_run_time, parse_run_time
 
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
@@ -43,6 +51,12 @@ MAX_ATTEMPTS = int(os.environ.get("MAX_ATTEMPTS", "5"))
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", "30"))
 BACKOFF_BASE = 2  # seconds; delay = BACKOFF_BASE * 2**(attempt-1)
 
+# ---- healing (M5). Each constant is justified in docs/pipeline.md.
+OVERLAP_HOURS = int(os.environ.get("OVERLAP_HOURS", "24"))        # re-fetch this much already-landed data: forecasts of past hours get revised
+SOURCE_MEMORY_DAYS = 92                                           # Open-Meteo marine: past_days is at most 92; older hours cannot be fetched
+FIRST_RUN_PAST_DAYS = int(os.environ.get("FIRST_RUN_PAST_DAYS", "2"))  # no landed file yet: same window as M1
+AIS_GAP_WARN_HOURS = float(os.environ.get("AIS_GAP_WARN_HOURS", "3"))  # AIS has no history: warn when the last window is older than this
+
 
 class IngestError(Exception):
     """Non-recoverable or retries-exhausted failure for one source."""
@@ -52,16 +66,49 @@ class AuthError(IngestError):
     """401/403 or invalid API key. Never retried."""
 
 
-def utc_stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+def utc_stamp(run_time: datetime) -> str:
+    """File name stamp = the pipeline's clock, never the wall clock."""
+    return run_time.strftime("%Y%m%dT%H%M%SZ")
 
 
-def open_new_file(source: str, ext: str):
+def open_new_file(source: str, ext: str, run_time: datetime):
     """Open a brand-new raw file (mode 'xb' -> refuses to overwrite)."""
     folder = RAW_DIR / source
     folder.mkdir(parents=True, exist_ok=True)
-    path = folder / f"{utc_stamp()}.{ext}"
-    return path, open(path, "xb")
+    path = folder / f"{utc_stamp(run_time)}.{ext}"
+    try:
+        return path, open(path, "xb")
+    except FileExistsError:
+        raise IngestError(f"a raw file for run time {format_run_time(run_time)} already exists: {path.name}")
+
+
+def last_landed(source: str, ext: str):
+    """Stamp of the newest raw file of a source (a file exists only after a fully successful fetch), or None."""
+    folder = RAW_DIR / source
+    stamps = []
+    for p in folder.glob("*." + ext) if folder.is_dir() else []:
+        try:
+            stamps.append(datetime.strptime(p.stem, "%Y%m%dT%H%M%SZ").replace(tzinfo=timezone.utc))
+        except ValueError:
+            raise IngestError(f"raw file name is not a UTC stamp: {p.name}")
+    return max(stamps) if stamps else None
+
+
+def plan_marine_window(run_time, last, overlap_hours=None, memory_days=None, first_run_past_days=None) -> dict:
+    """How far back must the marine request reach? Pure function (tested without a network).
+
+    need = (run_time - last) + overlap. Open-Meteo returns whole days, so past_days counts calendar days back
+    from the run date. lost=True means the gap is longer than the source's memory: the oldest hours are gone.
+    """
+    overlap_hours = OVERLAP_HOURS if overlap_hours is None else overlap_hours
+    memory_days = SOURCE_MEMORY_DAYS if memory_days is None else memory_days
+    first_run_past_days = FIRST_RUN_PAST_DAYS if first_run_past_days is None else first_run_past_days
+    if last is None:
+        return {"past_days": min(first_run_past_days, memory_days), "gap_hours": None, "needed_days": first_run_past_days, "lost": False}
+    gap_hours = max((run_time - last).total_seconds() / 3600.0, 0.0)
+    start = run_time - timedelta(hours=gap_hours + overlap_hours)
+    needed = max((run_time.date() - start.date()).days, 1)
+    return {"past_days": min(needed, memory_days), "gap_hours": gap_hours, "needed_days": needed, "lost": needed > memory_days}
 
 
 # ---------------------------------------------------------------- HTTP helper
@@ -94,7 +141,7 @@ def request_with_retry(session: requests.Session, url: str, params: dict) -> req
 
 
 # ---------------------------------------------------------------- source 1: AISStream
-def ingest_ais() -> dict:
+def ingest_ais(run_time) -> dict:
     api_key = os.environ.get("AISSTREAM_API_KEY")
     if not api_key:
         raise AuthError("AISSTREAM_API_KEY is not set (see .env.example).")
@@ -106,7 +153,11 @@ def ingest_ais() -> dict:
         "FilterMessageTypes": ["PositionReport"],
     })
 
-    path, fh = open_new_file("ais", "jsonl")
+    last = last_landed("ais", "jsonl")
+    if last is not None and (run_time - last).total_seconds() / 3600.0 > AIS_GAP_WARN_HOURS:
+        log.warning("WARNING: no AIS window for %.1f h (last landed %s). AISStream keeps no history: the vessel "
+                    "positions of that period are lost for good.", (run_time - last).total_seconds() / 3600.0, format_run_time(last))
+    path, fh = open_new_file("ais", "jsonl", run_time)
     deadline = time.monotonic() + AIS_COLLECT_SECONDS
     count = 0
     failures = 0
@@ -167,12 +218,15 @@ def ingest_ais() -> dict:
 
 
 # ---------------------------------------------------------------- source 2: Open-Meteo Marine
-def ingest_marine() -> dict:
+def ingest_marine(run_time) -> dict:
+    plan = plan_marine_window(run_time, last_landed("marine", "json"))
+    log.info("Marine: gap since last landed file %s h, asking for past_days=%d (overlap %d h)",
+             "n/a (first run)" if plan["gap_hours"] is None else "%.1f" % plan["gap_hours"], plan["past_days"], OVERLAP_HOURS)
     params = {
         "latitude": ",".join(str(p[0]) for p in MARINE_POINTS),
         "longitude": ",".join(str(p[1]) for p in MARINE_POINTS),
         "hourly": "wave_height,wave_direction,wave_period,wind_wave_height",
-        "past_days": 1,
+        "past_days": plan["past_days"],
         "forecast_days": 1,
         "timezone": "UTC",
     }
@@ -200,18 +254,28 @@ def ingest_marine() -> dict:
         log.warning("Marine: %d/%d points returned only null wave_height (no model coverage there)",
                     empty_points, len(locations))
 
-    path, fh = open_new_file("marine", "json")
+    path, fh = open_new_file("marine", "json", run_time)
     with fh:
         fh.write(resp.content)  # exactly as received
+    if plan["lost"]:   # the file is landed (everything the source still has), and the run still fails loudly
+        raise IngestError("GAP: %.1f h since the last landed file is more than Open-Meteo's %d days of archive; "
+                          "the hours before %s cannot be recovered" % (
+                              plan["gap_hours"], SOURCE_MEMORY_DAYS, format_run_time(run_time - timedelta(days=SOURCE_MEMORY_DAYS))))
     return {"files": 1, "records": len(locations), "path": str(path.relative_to(ROOT)),
-            "null_points": empty_points}
+            "null_points": empty_points, "past_days": plan["past_days"]}
 
 
 # ---------------------------------------------------------------- main
 def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--run-time", help="the pipeline's clock, e.g. 2026-11-20T08:10Z (default: now)")
+    args = ap.parse_args()
+    drill("ingest")
+    run_time = parse_run_time(args.run_time)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    sources = [("AISStream (AIS PositionReports)", ingest_ais),
-               ("Open-Meteo Marine (wave grid)", ingest_marine)]
+    log.info("run time (pipeline clock): %s", format_run_time(run_time))
+    sources = [("AISStream (AIS PositionReports)", lambda: ingest_ais(run_time)),
+               ("Open-Meteo Marine (wave grid)", lambda: ingest_marine(run_time))]
     results, failed = [], []
 
     for name, fn in sources:

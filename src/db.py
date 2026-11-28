@@ -2,6 +2,7 @@
 import hashlib
 import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,13 +28,18 @@ DUMP_SQL = {
 }
 
 
-def connect(path=None) -> sqlite3.Connection:
+def connect(path=None, create=False) -> sqlite3.Connection:
     """Open the database. foreign_keys is switched on immediately.
 
+    A database that should already exist is never created by accident: with create=False (the default)
+    a missing file is an error. Only load.py, which builds the database, passes create=True.
     isolation_level=None -> we control transactions explicitly (see transaction()).
     """
     path = Path(path) if path else DEFAULT_DB
-    path.parent.mkdir(parents=True, exist_ok=True)
+    if not path.exists():
+        if not create:
+            raise FileNotFoundError("database %s does not exist (run src/load.py first)" % path)
+        path.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, isolation_level=None)
     con.execute("PRAGMA foreign_keys = ON")
     if con.execute("PRAGMA foreign_keys").fetchone()[0] != 1:
@@ -41,21 +47,41 @@ def connect(path=None) -> sqlite3.Connection:
     return con
 
 
-RUN_TIME_FMT = "%Y-%m-%dT%H:%MZ"
+# ---------------------------------------------------------------- the pipeline's clock (M5)
+RUN_TIME_FORMAT = "%Y-%m-%dT%H:%MZ"
 
 
-def run_time() -> str:
-    """The pipeline's clock as ISO 8601 UTC, e.g. '2026-11-20T08:10Z'.
+def parse_run_time(value=None) -> datetime:
+    """The pipeline's clock: '2026-11-20T08:10Z' (or with seconds) -> aware UTC datetime.
 
-    run_pipeline.py sets PIPELINE_RUN_TIME for every step, so all steps of one run
-    share one clock. When a script is started by hand without it, fall back to now.
-    Every "since", "last 24 hours" or "today" decision must use this, never datetime.now().
+    With value=None it returns the current time to the minute. This is the ONE place where a run reads the
+    wall clock; every step receives the result through --run-time and decides everything from it.
     """
-    value = os.environ.get("PIPELINE_RUN_TIME")
-    if value:
-        datetime.strptime(value, RUN_TIME_FMT)  # raises ValueError on a malformed clock
-        return value
-    return datetime.now(timezone.utc).strftime(RUN_TIME_FMT)
+    if value is None:
+        return datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    for fmt in ("%Y-%m-%dT%H:%MZ", "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    raise ValueError("run time must look like 2026-11-20T08:10Z, got %r" % value)
+
+
+def format_run_time(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime(RUN_TIME_FORMAT)
+
+
+def drill(step: str) -> None:
+    """Failure drills (M5, section 6). OFF unless PIPELINE_DRILL is set, e.g. PIPELINE_DRILL=load=fail,clean=hang.
+
+    fail -> the step crashes with an exception (exit code 1); hang -> the step sleeps until the runner's timeout.
+    """
+    for item in os.environ.get("PIPELINE_DRILL", "").split(","):
+        name, _, mode = item.strip().partition("=")
+        if name == step and mode == "fail":
+            raise RuntimeError("drill: injected failure in step %r" % step)
+        if name == step and mode == "hang":
+            time.sleep(3600)
 
 
 @contextmanager

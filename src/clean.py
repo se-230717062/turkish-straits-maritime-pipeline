@@ -25,7 +25,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 import clean_config as C
-from db import ROOT, connect, table_digest, transaction
+from db import ROOT, connect, drill, table_digest, transaction
 
 CLEAN_SCHEMA = ROOT / "sql" / "clean_schema.sql"
 MAPPING_DIR = ROOT / "data" / "mappings"
@@ -376,7 +376,11 @@ def main():
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--db")
-    return run(ap.parse_args().db)
+    ap.add_argument("--run-time", help="the pipeline's clock (accepted; the cleaned layer is rebuilt from the whole history, "
+                                       "so no flag depends on when the scheduler ran)")
+    args = ap.parse_args()
+    drill("clean")
+    return run(args.db)
 
 
 if __name__ == "__main__":

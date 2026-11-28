@@ -22,7 +22,7 @@ def report(name, ok, detail=""):
 
 
 def make_db(path):
-    con = connect(path)
+    con = connect(path, create=True)
     init_schema(con)
     ts = "2026-10-11T16:00:00Z"
     for mmsi, name in [(271000001, "ALPHA ONE"), (271000002, "@@@@@@@@@@"), (271000003, "I\u0307STANBUL"),

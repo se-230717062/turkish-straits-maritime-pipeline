@@ -12,3 +12,7 @@ data/pipeline.lock
 
 logs/
 data/pipeline.lock
+data/pipeline_log.db
+data/pipeline.lock
+logs/
+.venv/

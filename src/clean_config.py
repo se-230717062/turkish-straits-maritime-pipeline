@@ -36,3 +36,10 @@ WIND_TOL_M = 0.05           # wind-wave height may exceed total wave height by a
 # ---- validate.py -------------------------------------------------------------------------------
 MAX_MISSING_SHARE = 0.20    # WARN when a marine point has more than this share of missing_not_reported heights
 MAX_GAP_HOURS = 24          # WARN when a marine point has a gap longer than this between consecutive readings
+
+# ---- M5: checks measured from the pipeline's clock (validate.py, monitor.py share these)
+RECENT_DAYS = 7             # history-based WARNs (stuck, gaps, conflicts) only look at this many days before the run time,
+                            # so an old, already-understood event cannot keep a WARN on forever
+MAX_FEED_AGE_HOURS = 3      # the newest landed AIS / marine file may be at most this old at run time (hourly schedule x 3)
+VOLUME_FACTOR = 10          # rows landed by the latest run vs the median earlier run: WARN beyond a factor of 10 either way
+VOLUME_MIN_HISTORY = 3      # fewer earlier runs than this: not enough history to call anything unusual

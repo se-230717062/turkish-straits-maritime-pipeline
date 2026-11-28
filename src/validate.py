@@ -1,33 +1,23 @@
 #!/usr/bin/env python3
-"""M3/M5 validation: expectations on the cleaned layer, as code. PASS / INFO / WARN / STOP per check.
+"""M3 validation: expectations on the cleaned layer, as code. PASS / WARN / STOP per check.
 
-Run from the repository root:  python src/validate.py [--db PATH] [--run-time 2026-11-20T08:10Z]
+Run from the repository root:  python src/validate.py [--run-time 2026-11-20T08:10Z] [--rebuild]
 Exit code 1 if any STOP fails. WARNs are printed every time but do not stop the pipeline.
-Every "how old" and "this run" decision is measured from the pipeline's clock (db.run_time()),
-never from datetime.now() and never from MAX(observed_at).
+
+M5: freshness and recency are measured from the run time (--run-time), not from MAX(observed_at), so a feed that
+stopped is seen. History-based WARNs only look at the last RECENT_DAYS before the run time (no permanent WARNs).
+--rebuild (used by run_pipeline.py --skip-ingest) turns the freshness and volume checks into INFO: a rebuild from
+landed files is not expected to have fresh data.
 """
+import argparse
+import statistics
 import sys
 from collections import Counter
-from datetime import datetime, timedelta
-from statistics import median
+from datetime import timedelta
 
 import clean_config as C
 from clean import name_key
-from db import RUN_TIME_FMT, connect, run_time
-
-# ---- M5 thresholds. Each one says why it has this value.
-# The pipeline runs hourly and a few failed runs in a row do happen (laptop asleep, AIS reconnects).
-# Six hours with nothing new means the feed has really stopped; monitor.py alarms much earlier on missed runs.
-FEED_MAX_AGE_HOURS = 6
-# A run's raw files are stamped within minutes after the run time. One hour never reaches the next run.
-RUN_WINDOW_MINUTES = 60
-# "Typical run" = the median of the files of the last 24 runs (a day); fewer than 3 files is no baseline yet.
-VOLUME_HISTORY_FILES = 24
-MIN_BASELINE_FILES = 3
-# The assignment calls "ten times the usual" suspicious.
-VOLUME_FACTOR = 10
-# Wave gaps older than this are history we cannot repair; checking all of it would WARN on every run forever.
-RECENT_DAYS = 3
+from db import connect, drill, format_run_time, parse_run_time
 
 PAIRS = (("vessel_clean", "vessel", "SELECT COUNT(*) FROM vessel_clean", "SELECT COUNT(*) FROM vessel"),
          ("ais_position_clean", "ais_position", "SELECT COUNT(*) FROM ais_position_clean", "SELECT COUNT(*) FROM ais_position"),
@@ -66,37 +56,18 @@ RAW_MISMATCH = (
     "+ (SELECT COUNT(*) FROM vessel_clean c JOIN vessel r ON r.vessel_key = c.vessel_key WHERE "
     "c.mmsi_raw IS NOT r.mmsi OR c.ship_name_raw IS NOT r.ship_name)")
 
-# ---- M5 queries (retrieved_at = when a file was fetched; it is what shows that a feed is alive.
-# observed_at is not usable for this: the weather feed also delivers hours that are still in the future.)
-LAST_AIS_RETRIEVAL = "SELECT MAX(retrieved_at) FROM ais_position"
-HOURS_BEFORE = "SELECT (julianday(?) - julianday(?)) * 24.0"
-STALE_MARINE_POINTS = (
-    "SELECT p.point_key, MAX(w.retrieved_at) FROM marine_point p "
-    "LEFT JOIN wave_reading w ON w.point_key = p.point_key GROUP BY p.point_key "
-    "HAVING MAX(w.retrieved_at) IS NULL OR julianday(MAX(w.retrieved_at)) < julianday(?) - ?")
-AIS_ROWS_THIS_RUN = (
-    "SELECT COUNT(*) FROM ais_position WHERE julianday(retrieved_at) >= julianday(?) "
-    "AND julianday(retrieved_at) < julianday(?) + ?")
-WAVE_ROWS_THIS_RUN = (
-    "SELECT COUNT(*) FROM wave_reading WHERE julianday(retrieved_at) >= julianday(?) "
-    "AND julianday(retrieved_at) < julianday(?) + ?")
-AIS_ROWS_PER_EARLIER_FILE = (
-    "SELECT COUNT(*) FROM ais_position GROUP BY source_file "
-    "HAVING julianday(MAX(retrieved_at)) < julianday(?) ORDER BY julianday(MAX(retrieved_at)) DESC LIMIT ?")
-RECENT_WAVE_GAPS = (
-    "SELECT COUNT(*), MIN(prev), MIN(observed_at) FROM (SELECT point_key, observed_at, "
-    "LAG(observed_at) OVER (PARTITION BY point_key ORDER BY observed_at) AS prev FROM wave_reading_clean) "
-    "WHERE prev IS NOT NULL AND julianday(substr(observed_at, 1, 10) || ' ' || substr(observed_at, 12, 5)) "
-    "- julianday(substr(prev, 1, 10) || ' ' || substr(prev, 12, 5)) > ? "
-    "AND julianday(substr(observed_at, 1, 10) || ' ' || substr(observed_at, 12, 5)) >= julianday(?)")
 
-
-def run(db_path=None, out=print, now=None):
-    now = now or run_time()
-    recent_start = (datetime.strptime(now, RUN_TIME_FMT) - timedelta(days=RECENT_DAYS)).strftime("%Y-%m-%d %H:%M")
+def run(db_path=None, out=print, run_time=None, rebuild=False):
+    now = parse_run_time(None) if run_time is None else run_time
+    since = now - timedelta(days=C.RECENT_DAYS)
+    now_w, since_w = format_run_time(now), format_run_time(since)          # wave times: 2026-11-20T08:10Z
+    now_a, since_a = now_w[:16], since_w[:16]                                # AIS times start the same way, then add seconds
+    run_hour = now.strftime("%Y-%m-%dT%H:00Z")
     results = []
 
     def check(level, name, ok, detail):
+        if rebuild and level == "WARN" and name.startswith(("fresh", "volume")):
+            level = "INFO"
         status = "PASS" if ok else level
         results.append(status)
         out("%-5s %-46s %s" % (status, name, detail))
@@ -104,6 +75,7 @@ def run(db_path=None, out=print, now=None):
     con = connect(db_path)
     try:
         con.execute("PRAGMA query_only = ON")
+        out("run time (pipeline clock): %s%s" % (now_w, "  [rebuild: freshness and volume are INFO]" if rebuild else ""))
         # ---- STOP checks
         diffs = [(c, con.execute(q1).fetchone()[0], con.execute(q2).fetchone()[0]) for c, _, q1, q2 in PAIRS]
         check("STOP", "cleaned row count equals raw", all(a == b for _, a, b in diffs),
@@ -119,67 +91,62 @@ def run(db_path=None, out=print, now=None):
         n_raw = con.execute(RAW_MISMATCH).fetchone()[0]
         check("STOP", "_raw columns equal the M2 values", n_raw == 0, "%d mismatching rows" % n_raw)
 
-        # ---- freshness, measured from the run time (M5): the whole feed stopping shows up here
-        ais_last = con.execute(LAST_AIS_RETRIEVAL).fetchone()[0]
-        if ais_last is None:
-            check("WARN", "AIS feed newer than %d h" % FEED_MAX_AGE_HOURS, False, "no AIS rows at all")
-        else:
-            age = con.execute(HOURS_BEFORE, (now, ais_last)).fetchone()[0]
-            check("WARN", "AIS feed newer than %d h" % FEED_MAX_AGE_HOURS, age <= FEED_MAX_AGE_HOURS,
-                  "last retrieval %s, %.1f h before run time %s" % (ais_last, age, now))
-        stale = con.execute(STALE_MARINE_POINTS, (now, FEED_MAX_AGE_HOURS / 24.0)).fetchall()
-        check("WARN", "every marine point retrieved < %d h ago" % FEED_MAX_AGE_HOURS, not stale,
-              "all points retrieved recently" if not stale else
-              "stale points (point, last retrieval): %s" % [tuple(r) for r in stale])
+        # ---- freshness measured from the run time
+        last_ais = con.execute("SELECT MAX(retrieved_at) FROM ais_position").fetchone()[0]
+        last_wav = con.execute("SELECT MAX(retrieved_at) FROM wave_reading").fetchone()[0]
+        for label, last in (("AIS", last_ais), ("marine", last_wav)):
+            if last is None:
+                check("WARN", "fresh: %s feed landed recently" % label, False, "no %s data at all" % label)
+                continue
+            age = (now - parse_run_time(last[:16] + "Z")).total_seconds() / 3600.0
+            check("WARN", "fresh: %s file at most %dh old" % (label, C.MAX_FEED_AGE_HOURS), 0 <= age <= C.MAX_FEED_AGE_HOURS,
+                  "newest %s file retrieved %s, %.1f h before the run time" % (label, last[:16] + "Z", age))
+        stale = [k for (k,) in con.execute(
+            "SELECT point_key FROM marine_point WHERE point_key NOT IN "
+            "(SELECT point_key FROM wave_reading_clean WHERE observed_at = ? AND wave_height IS NOT NULL)", (run_hour,))]
+        check("WARN", "fresh: every point has a value at the run hour", not stale,
+              "all points have %s" % run_hour if not stale else "no value at %s for points %s" % (run_hour, stale))
 
-        # ---- volume: rows from this run compared with a typical run (M5)
-        window = RUN_WINDOW_MINUTES / 1440.0
-        ais_now = con.execute(AIS_ROWS_THIS_RUN, (now, now, window)).fetchone()[0]
-        earlier = [n for (n,) in con.execute(AIS_ROWS_PER_EARLIER_FILE, (now, VOLUME_HISTORY_FILES))]
-        if len(earlier) < MIN_BASELINE_FILES:
-            check("WARN", "AIS volume this run vs typical", ais_now > 0,
-                  "%d rows this run; no baseline yet (%d earlier files)" % (ais_now, len(earlier)))
+        # ---- volume: rows landed by the latest run against a typical earlier run (AIS: every landed file is new rows)
+        groups = [n for _, n in con.execute("SELECT retrieved_at, COUNT(*) FROM ais_position GROUP BY retrieved_at ORDER BY retrieved_at")]
+        if len(groups) > C.VOLUME_MIN_HISTORY:
+            latest, typical = groups[-1], statistics.median(groups[:-1])
+            ok = typical > 0 and typical / C.VOLUME_FACTOR <= latest <= typical * C.VOLUME_FACTOR
+            check("WARN", "volume: AIS rows of the latest run", ok,
+                  "%d rows against a typical %.0f (median of %d earlier runs)" % (latest, typical, len(groups) - 1))
         else:
-            typical = median(earlier)
-            check("WARN", "AIS volume this run vs typical", 0 < ais_now <= VOLUME_FACTOR * typical,
-                  "%d rows this run, typical %d (median of %d earlier files)" % (ais_now, typical, len(earlier)))
-        wave_now = con.execute(WAVE_ROWS_THIS_RUN, (now, now, window)).fetchone()[0]
-        check("WARN", "marine rows delivered this run", wave_now > 0, "%d readings from this run" % wave_now)
+            check("WARN", "volume: AIS rows of the latest run", True, "only %d landed files so far, not enough history" % len(groups))
 
-        # ---- WARN checks
-        share = {k: s for k, s in con.execute(
+        # ---- the M3 checks, now relative to the run time (recent window only)
+        share = {k: s_ for k, s_ in con.execute(
             "SELECT point_key, AVG(wave_height_flag = 'missing_not_reported') FROM wave_reading_clean GROUP BY point_key")}
-        bad = {k: round(s, 2) for k, s in share.items() if s > C.MAX_MISSING_SHARE}
+        bad = {k: round(s_, 2) for k, s_ in share.items() if s_ > C.MAX_MISSING_SHARE}
         check("WARN", "missing share per marine point <= %d%%" % round(100 * C.MAX_MISSING_SHARE), not bad,
               "all %d points ok" % len(share) if not bad else "points over: %s" % bad)
         nocov = [k for (k,) in con.execute("SELECT DISTINCT point_key FROM wave_reading_clean "
                                            "WHERE wave_height_flag = 'missing_no_model_coverage'")]
         check("WARN", "every marine point has model coverage", not nocov,
               "all points covered" if not nocov else "no model data at points %s" % nocov)
-        # per-entity version of freshness: one point going quiet in the latest hour of the feed
-        latest = con.execute("SELECT MAX(observed_at) FROM wave_reading_clean").fetchone()[0]
-        stale = [k for (k,) in con.execute(
-            "SELECT point_key FROM marine_point WHERE point_key NOT IN "
-            "(SELECT point_key FROM wave_reading_clean WHERE observed_at = ? AND wave_height IS NOT NULL)", (latest,))]
-        check("WARN", "every point has a value in the latest hour", not stale,
-              "latest hour %s" % latest if not stale else "latest hour %s, missing at points %s" % (latest, stale))
-        # only recent gaps: old ones are history we cannot repair and would WARN on every run forever
-        gaps = con.execute(RECENT_WAVE_GAPS, (C.MAX_GAP_HOURS / 24.0, recent_start)).fetchone()
-        check("WARN", "no wave gap > %d h in the last %d days" % (C.MAX_GAP_HOURS, RECENT_DAYS), gaps[0] == 0,
-              "no recent gaps" if gaps[0] == 0 else "%d gaps (first: %s -> %s)" % gaps)
-        # INFO, not WARN: data properties already reported in docs/cleaning_report.md that never go away.
-        # Downgraded on purpose; the reason must also be written in docs/pipeline.md.
-        n_stuck = con.execute("SELECT COUNT(*) FROM wave_reading_clean WHERE wave_height_flag = 'stuck_value'").fetchone()[0]
-        check("INFO", "stuck_value wave heights (history)", n_stuck == 0, "%d stuck_value flags" % n_stuck)
-        n_wind = con.execute("SELECT COUNT(*) FROM wave_reading_clean "
-                             "WHERE wind_wave_height_flag = 'inconsistent_exceeds_total'").fetchone()[0]
-        check("WARN", "wind-wave height never exceeds total", n_wind == 0, "%d inconsistent rows" % n_wind)
-        n_nav = con.execute("SELECT COUNT(*) FROM ais_position_clean "
-                            "WHERE row_flag = 'nav_status_conflicts_with_sog'").fetchone()[0]
-        check("INFO", "nav_status vs sog conflicts (history)", n_nav == 0, "%d conflicting positions" % n_nav)
-        n_pos = con.execute("SELECT COUNT(*) FROM ais_position_clean "
-                            "WHERE latitude IS NULL OR longitude IS NULL").fetchone()[0]
-        check("WARN", "every AIS position has usable coordinates", n_pos == 0, "%d positions without a usable coordinate" % n_pos)
+        gaps = con.execute(
+            "SELECT COUNT(*), MIN(prev), MIN(observed_at) FROM (SELECT point_key, observed_at, "
+            "LAG(observed_at) OVER (PARTITION BY point_key ORDER BY observed_at) AS prev FROM wave_reading_clean "
+            "WHERE observed_at >= ? AND observed_at <= ?) "
+            "WHERE prev IS NOT NULL AND julianday(substr(observed_at, 1, 10) || ' ' || substr(observed_at, 12, 5)) "
+            "- julianday(substr(prev, 1, 10) || ' ' || substr(prev, 12, 5)) > ?", (since_w, now_w, C.MAX_GAP_HOURS / 24.0)).fetchone()
+        check("WARN", "no wave gap > %d h in the last %d days" % (C.MAX_GAP_HOURS, C.RECENT_DAYS), gaps[0] == 0,
+              "no gaps" if gaps[0] == 0 else "%d gaps (first: %s -> %s)" % gaps)
+        n_stuck = con.execute("SELECT COUNT(*) FROM wave_reading_clean WHERE wave_height_flag = 'stuck_value' "
+                              "AND observed_at >= ? AND observed_at <= ?", (since_w, now_w)).fetchone()[0]
+        check("WARN", "no new stuck_value wave heights (%d d)" % C.RECENT_DAYS, n_stuck == 0, "%d stuck_value flags" % n_stuck)
+        n_wind = con.execute("SELECT COUNT(*) FROM wave_reading_clean WHERE wind_wave_height_flag = 'inconsistent_exceeds_total' "
+                             "AND observed_at >= ? AND observed_at <= ?", (since_w, now_w)).fetchone()[0]
+        check("WARN", "wind-wave height never exceeds total (%d d)" % C.RECENT_DAYS, n_wind == 0, "%d inconsistent rows" % n_wind)
+        n_nav = con.execute("SELECT COUNT(*) FROM ais_position_clean WHERE row_flag = 'nav_status_conflicts_with_sog' "
+                            "AND observed_at >= ? AND observed_at <= ?", (since_a, now_a + "~")).fetchone()[0]
+        check("WARN", "nav_status agrees with sog (%d d)" % C.RECENT_DAYS, n_nav == 0, "%d conflicting positions" % n_nav)
+        n_pos = con.execute("SELECT COUNT(*) FROM ais_position_clean WHERE (latitude IS NULL OR longitude IS NULL) "
+                            "AND observed_at >= ? AND observed_at <= ?", (since_a, now_a + "~")).fetchone()[0]
+        check("WARN", "every recent AIS position has coordinates", n_pos == 0, "%d positions without a usable coordinate (%d d)" % (n_pos, C.RECENT_DAYS))
         keys = Counter(name_key(n) for (n,) in con.execute("SELECT ship_name FROM vessel_clean WHERE ship_name IS NOT NULL"))
         dup = sorted(k for k, c in keys.items() if c > 1)
         check("WARN", "no two vessels share a normalised name", not dup,
@@ -194,17 +161,15 @@ def run(db_path=None, out=print, now=None):
     finally:
         con.close()
     stops = results.count("STOP")
-    out("%d PASS, %d INFO, %d WARN, %d STOP" % (results.count("PASS"), results.count("INFO"),
-                                                  results.count("WARN"), stops))
+    out("%d PASS, %d WARN, %d STOP, %d INFO" % (results.count("PASS"), results.count("WARN"), stops, results.count("INFO")))
     return 1 if stops else 0
 
 
 if __name__ == "__main__":
-    import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument("--db")
-    ap.add_argument("--run-time", help="pipeline clock, e.g. 2026-11-20T08:10Z (default: PIPELINE_RUN_TIME or now)")
+    ap.add_argument("--run-time", help="the pipeline's clock, e.g. 2026-11-20T08:10Z (default: now)")
+    ap.add_argument("--rebuild", action="store_true", help="a rebuild from landed files: freshness and volume are INFO")
     args = ap.parse_args()
-    if args.run_time:
-        datetime.strptime(args.run_time, RUN_TIME_FMT)
-    sys.exit(run(args.db, now=args.run_time))
+    drill("validate")
+    sys.exit(run(args.db, run_time=parse_run_time(args.run_time), rebuild=args.rebuild))
