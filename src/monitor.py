@@ -30,6 +30,7 @@ LAST_SUCCESS_SQL = """
 SELECT MAX(run_time) AS last_success,
        ROUND((julianday(:now) - julianday(MAX(run_time))) * 24, 1) AS hours_ago
 FROM (SELECT run_id, run_time FROM pipeline_run
+      WHERE run_time <= :now
       GROUP BY run_id HAVING COUNT(*) = :n_steps AND MAX(exit_code) = 0)
 """
 GAPS_SQL = """
@@ -129,8 +130,9 @@ def run(db_path=None, log_path=None, now=None, out=print) -> int:
             report("freshness: wave per point", not stale, "every point has a value up to or beyond now - %d h" % WAVE_LATEST_MAX_AGE_HOURS
                    if not stale else "points with an old latest value: %s" % [(k, v) for k, v in stale])
             ages = []
-            for label, sql in (("AIS", "SELECT MAX(retrieved_at) FROM ais_position"), ("marine", "SELECT MAX(retrieved_at) FROM wave_reading")):
-                last = db.execute(sql).fetchone()[0]
+            for label, sql in (("AIS", "SELECT MAX(retrieved_at) FROM ais_position WHERE julianday(retrieved_at) <= julianday(?)"),
+                               ("marine", "SELECT MAX(retrieved_at) FROM wave_reading WHERE julianday(retrieved_at) <= julianday(?)")):
+                last = db.execute(sql, (now_s,)).fetchone()[0]
                 ages.append((label, last, None if last is None else (now - parse_run_time(last[:16] + "Z")).total_seconds() / 3600.0))
             bad = [a for a in ages if a[2] is None or a[2] > FEED_MAX_AGE_HOURS]
             report("freshness: newest landed file", not bad, ", ".join("%s %s (%.1f h)" % (a[0], a[1][:16] + "Z", a[2]) for a in ages)
